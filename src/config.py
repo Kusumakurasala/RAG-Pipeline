@@ -9,7 +9,7 @@ DATA_DIR.mkdir(exist_ok=True)
 DB_DIR.mkdir(exist_ok=True)
 
 EMBEDDING_MODEL = "text-embedding-004"
-LLM_MODEL = "gemini-2.5-flash-preview-09-2025"
+LLM_MODEL = "gemini-2.5-flash"
 COLLECTION_NAME = "document_knowledge_base"
 
 CHUNK_SIZE = 1000

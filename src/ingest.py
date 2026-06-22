@@ -3,14 +3,9 @@ import glob
 from pypdf import PdfReader
 import docx
 import chromadb
-import google.generativeai as genai
-from dotenv import load_dotenv
+from chromadb.utils import embedding_functions
 
-from config import DATA_DIR, DB_DIR, EMBEDDING_MODEL, COLLECTION_NAME, CHUNK_SIZE, CHUNK_OVERLAP
-
-load_dotenv()
-api_key = os.getenv("GEMINI_API_KEY")
-genai.configure(api_key=api_key)
+from config import DATA_DIR, DB_DIR, COLLECTION_NAME, CHUNK_SIZE, CHUNK_OVERLAP
 
 def extract_pdf_pages(file_path: str) -> list[dict]:
     extracted_data = []
@@ -81,44 +76,33 @@ def build_vector_database():
         all_pages.extend(extract_docx_pages(file))
         
     if not all_pages:
-        print("No documents found in data/ folder. Please drop your files in data/ directory first!")
+        print("No documents found in data/ folder.")
         return
 
     chunks = chunk_extracted_pages(all_pages)
+    print(f"Processing {len(chunks)} chunks using local default embedding function...")
     
-    # Generate embeddings explicitly using raw Google AI to bypass Chroma's internal bug
-    print(f"Generating vectors for {len(chunks)} chunks via Gemini API...")
     documents = [c["text"] for c in chunks]
     metadatas = [c["metadata"] for c in chunks]
-    
-    embeddings = []
-    # Process text fragments through API loop
-    for text in documents:
-        response = genai.embed_content(
-            model=EMBEDDING_MODEL,
-            content=text,
-            task_type="retrieval_document"
-        )
-        embeddings.append(response['embedding'])
+    ids = [f"id_{i}" for i in range(len(chunks))]
 
     client = chromadb.PersistentClient(path=str(DB_DIR))
     
-    # Initialize basic collection without the faulty internal mapping function
+    # Use Chroma's local built-in default embedding library
+    default_ef = embedding_functions.DefaultEmbeddingFunction()
+    
     collection = client.get_or_create_collection(
         name=COLLECTION_NAME,
-        metadata={"hnsw:space": "cosine"}
+        metadata={"hnsw:space": "cosine"},
+        embedding_function=default_ef
     )
     
-    ids = [f"id_{i}" for i in range(len(chunks))]
-    
-    # Add pre-computed vectors manually
     collection.add(
         ids=ids,
-        embeddings=embeddings,
         documents=documents,
         metadatas=metadatas
     )
-    print(f"🎉 Success! Indexed {len(chunks)} document chunks directly into local database folder.")
+    print(f"Success! Locally indexed {len(chunks)} document chunks without API requests.")
 
 if __name__ == "__main__":
     build_vector_database()

@@ -1,6 +1,7 @@
 import os
 import chromadb
 import google.generativeai as genai
+from chromadb.utils import embedding_functions
 from dotenv import load_dotenv
 
 from config import DB_DIR, LLM_MODEL, COLLECTION_NAME, TOP_K_RESULTS
@@ -10,29 +11,25 @@ api_key = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=api_key)
 
 def retrieve_and_answer(user_query: str) -> tuple[str, list]:
-    # 1. Generate query embedding using explicit model path mapping
-    response = genai.embed_content(
-        model="text-embedding-004",  # Fixed direct string query embedding
-        content=user_query,
-        task_type="retrieval_query"
-    )
-    query_vector = response['embedding']
-    
-    # 2. Search Database
     client = chromadb.PersistentClient(path=str(DB_DIR))
+    default_ef = embedding_functions.DefaultEmbeddingFunction()
+    
     try:
-        collection = client.get_collection(name=COLLECTION_NAME)
+        collection = client.get_collection(
+            name=COLLECTION_NAME, 
+            embedding_function=default_ef
+        )
+        # Search Database using the local text query mapping
         results = collection.query(
-            query_embeddings=[query_vector],
+            query_texts=[user_query],
             n_results=TOP_K_RESULTS
         )
-    except Exception:
-        return "The local knowledge vector database hasn't been built. Please run python src/ingest.py first!", []
+    except Exception as e:
+        return f"Database error or missing indexing: {str(e)}", []
         
     if not results or not results['documents'] or len(results['documents'][0]) == 0:
         return "No relevant information matching your question was found in the files.", []
         
-    # 3. Construct Context Prompt
     retrieved_docs = results['documents'][0]
     sources = results['metadatas'][0]
     
@@ -45,13 +42,12 @@ def retrieve_and_answer(user_query: str) -> tuple[str, list]:
         f"Context Information:\n{context_str}"
     )
     
-    # 4. Request Gemini Answer
+    # Request Gemini for text generation answer only
     model = genai.GenerativeModel(LLM_MODEL)
     ai_response = model.generate_content(
         contents=[system_prompt, f"User Question: {user_query}"]
     )
     
-    # Bundle matching references
     references = []
     for doc, src in zip(retrieved_docs, sources):
         references.append({
